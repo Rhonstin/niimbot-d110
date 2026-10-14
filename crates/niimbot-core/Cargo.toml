@@ -1,0 +1,5 @@
+[package]
+name = "niimbot-core"
+version = "0.1.0"
+edition = "2021"
+description = "Transport-independent NIIMBOT D110 packet and printing protocol"
