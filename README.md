@@ -48,6 +48,9 @@ discovery. The app does not use Bluetooth scanning to derive your location.
 
 ## Continuous integration and downloads
 
+[Download the latest public release](https://github.com/Rhonstin/niimbot-d110/releases/latest).
+Releases include installers for every platform and `SHA256SUMS.txt`.
+
 [Build and test](https://github.com/Rhonstin/niimbot-d110/actions/workflows/ci.yml)
 runs on pushes to `main`, version tags (`v*`), pull requests, and manual runs.
 Download installers from the workflow run's **Artifacts** section:
@@ -67,6 +70,12 @@ build artifacts are retained for 14 days. Builds do not require printer hardware
 Desktop installers are not signed/notarized with a distribution certificate.
 Android artifacts are development builds signed with the runner's debug key.
 Store publishing and production signing are separate from these CI builds.
+
+To publish a release, add `.github/release-notes/vX.Y.Z.md` and update
+`.github/release.json` with its tag, full source commit, and successful CI run ID.
+Pushing that request to `main` starts the publish workflow, which verifies the
+source version and all platform artifacts before creating the release. The tag
+points to the tested source commit. Existing releases are never overwritten.
 
 ## Local builds
 

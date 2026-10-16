@@ -8,4 +8,5 @@ src-tauri/gen/apple/
 .env.*
 !.env.example
 *.log
+__pycache__/
 .DS_Store
