@@ -41,7 +41,8 @@ Choose **Find printer → Connect**, then select the actual loaded label size.
 `npm run dev` opens the editor in a browser. Native Bluetooth is available
 inside the Tauri app. Browser mode still supports editing and PNG export.
 
-On macOS the system requests Bluetooth permission. On Android allow **Nearby
+On macOS the system requests Bluetooth permission. Android requires version
+8.0 (API 26) or later. On Android allow **Nearby
 devices**; older Android versions also require location permission for BLE
 discovery. The app does not use Bluetooth scanning to derive your location.
 
