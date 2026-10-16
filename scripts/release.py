@@ -18,7 +18,7 @@ DESKTOP = {
     "aarch64-apple-darwin": ("macos-arm64", (".dmg",)),
     "x86_64-apple-darwin": ("macos-x64", (".dmg",)),
 }
-ARTIFACTS = {f"d110-studio-{target}" for target in DESKTOP} | {"d110-studio-android-debug"}
+ARTIFACTS = {f"d110-studio-{target}" for target in DESKTOP} | {"d110-studio-android"}
 
 
 def gh(*args):
@@ -51,12 +51,12 @@ def collect_assets(root, version):
             if len(matches) != 1 or matches[0].stat().st_size == 0:
                 raise ValueError(f"Expected one nonempty {platform} {extension} installer")
             assets.append((matches[0], f"d110-studio_{version}_{platform}{extension}"))
-    directory = root / "d110-studio-android-debug"
+    directory = root / "d110-studio-android"
     for abi, platform in [("arm64", "arm64"), ("x86_64", "x64")]:
-        matches = sorted(p for p in directory.rglob(f"app-{abi}-debug.apk") if p.is_file())
+        matches = sorted(p for p in directory.rglob(f"app-{abi}-release.apk") if p.is_file())
         if len(matches) != 1 or matches[0].stat().st_size == 0:
             raise ValueError(f"Expected one nonempty Android {abi} APK")
-        assets.append((matches[0], f"d110-studio_{version}_android-{platform}-debug.apk"))
+        assets.append((matches[0], f"d110-studio_{version}_android-{platform}.apk"))
     return assets
 
 

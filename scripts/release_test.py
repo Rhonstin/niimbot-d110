@@ -31,13 +31,13 @@ class ReleaseTest(unittest.TestCase):
             for target, (_, extensions) in DESKTOP.items():
                 for extension in extensions:
                     (root / f"d110-studio-{target}" / f"installer{extension}").write_bytes(b"data")
-            android = root / "d110-studio-android-debug"
+            android = root / "d110-studio-android"
             for abi in ["arm64", "x86_64"]:
-                (android / f"app-{abi}-debug.apk").write_bytes(b"apk")
+                (android / f"app-{abi}-release.apk").write_bytes(b"apk")
             assets = collect_assets(root, "0.1.0")
             self.assertEqual(len(assets), 12)
             self.assertEqual(len({name for _, name in assets}), 12)
-            missing = android / "app-arm64-debug.apk"
+            missing = android / "app-arm64-release.apk"
             missing.unlink()
             with self.assertRaisesRegex(ValueError, "Android arm64"):
                 collect_assets(root, "0.1.0")

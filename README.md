@@ -60,7 +60,7 @@ Download installers from the workflow run's **Artifacts** section:
 | Linux | x64, ARM64 | `.deb`, `.rpm`, `.AppImage` |
 | Windows | x64 | NSIS `.exe`, WiX `.msi` |
 | macOS | Apple Silicon, Intel | `.dmg` |
-| Android | ARM64, x64 emulator | Debug-signed `.apk`, one per ABI |
+| Android | ARM64, x64 emulator | Optimized release `.apk`, one per ABI |
 
 The checks job builds the frontend, runs the protocol, bitmap, localization,
 and Android manifest tests, then runs Rust formatting and Clippy. Platform
@@ -68,7 +68,10 @@ builds start only after those checks pass. Cargo/npm lockfiles are committed;
 build artifacts are retained for 14 days. Builds do not require printer hardware.
 
 Desktop installers are not signed/notarized with a distribution certificate.
-Android artifacts are development builds signed with the runner's debug key.
+Android APKs use release optimization, R8, stripped native libraries, and the
+runner's development signing key. CI checks each APK is under 25 MiB and contains
+only its intended ABI, without native debug symbols. They are installable test
+builds; each CI run creates a new development certificate.
 Store publishing and production signing are separate from these CI builds.
 
 To publish a release, add `.github/release-notes/vX.Y.Z.md` and update
@@ -95,9 +98,9 @@ For Android, install JDK 17, the Android SDK/NDK, and the Rust targets first:
 
 ```bash
 npm run tauri android init -- --ci
-node scripts/prepare-android.mjs
+node scripts/prepare-android.mjs --ci-signing
 npm run tauri icon -- src-tauri/icons/icon.svg
-npm run tauri android build -- --ci --debug --apk --split-per-abi --target aarch64 --target x86_64
+CARGO_PROFILE_RELEASE_OPT_LEVEL=s npm run tauri android build -- --ci --apk --split-per-abi --target aarch64 --target x86_64
 ```
 
 The native Android project is generated from the pinned Tauri CLI. The setup
