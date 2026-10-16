@@ -1,20 +1,25 @@
 #[cfg(target_os = "linux")]
 mod bluez;
+mod printer;
+#[cfg(target_os = "linux")]
+use bluez as backend;
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "android"))]
+mod ble;
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "android"))]
+use ble as backend;
 
-#[cfg(not(target_os = "linux"))]
-compile_error!(
-    "This MVP uses Linux BlueZ. Add an Android BLE transport before building for Android."
-);
-
-use bluez::{Device, PrinterInfo, Session};
+use backend::Session;
 use niimbot_core::{Bitmap, PrintOptions, Stage};
+use printer::{Device, PrinterInfo};
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::{FsExt, OpenOptions};
 
 #[derive(Default)]
 struct PrinterService {
@@ -35,16 +40,16 @@ async fn with_service<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(move || {
         let mut guard = service
             .try_lock()
-            .map_err(|_| "Принтер уже виконує іншу операцію. Дочекайтеся завершення.")?;
+            .map_err(|_| "The printer is busy. Wait for the current operation to finish.")?;
         action(&mut guard)
     })
     .await
-    .map_err(|e| format!("Помилка Bluetooth-потоку: {e}"))?
+    .map_err(|e| format!("Bluetooth worker failed: {e}"))?
 }
 
 #[tauri::command]
 async fn scan_printers(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Device>, String> {
-    with_service(&state, move |_| bluez::scan(&app)).await
+    with_service(&state, move |_| backend::scan(&app)).await
 }
 
 #[tauri::command]
@@ -61,7 +66,7 @@ async fn connect_printer(
         let info = session
             .info
             .clone()
-            .ok_or("Не вдалося визначити модель принтера.")?;
+            .ok_or("Could not identify the printer model.")?;
         service.session = Some(session);
         Ok(info)
     })
@@ -74,7 +79,7 @@ async fn disconnect_printer(app: AppHandle, state: State<'_, AppState>) -> Resul
         if let Some(mut session) = service.session.take() {
             session.close()?;
         }
-        bluez::log(&app, "info", "Принтер відключено.");
+        printer::log(&app, "info", "Printer disconnected.");
         Ok(())
     })
     .await
@@ -131,9 +136,9 @@ async fn print_label(
         let session = service
             .session
             .as_mut()
-            .ok_or("Спочатку підключіть принтер.")?;
+            .ok_or("Connect your printer first.")?;
         if !session.is_connected()? {
-            return Err("З'єднання втрачено. Перепідключіть принтер.".into());
+            return Err("Connection lost. Reconnect your printer.".into());
         }
         let options = PrintOptions {
             density: request.density,
@@ -165,19 +170,19 @@ async fn print_label(
         );
         match result {
             Ok(completed_copies) => {
-                bluez::log(
+                printer::log(
                     &app,
                     "info",
-                    format!("Друк підтверджено: {completed_copies} копій."),
+                    format!("Print confirmed: {completed_copies} copies."),
                 );
                 Ok(PrintReport { completed_copies })
             }
             Err(error) => {
                 let message = format!(
-                    "{}. Завершено копій: {}. Перевірте етикетку перед повторним друком.",
+                    "{}. Completed copies: {}. Check the physical label before printing again.",
                     error.message, error.completed_copies
                 );
-                bluez::log(&app, "error", &message);
+                printer::log(&app, "error", &message);
                 // Failed jobs can leave firmware state uncertain. Require a fresh handshake.
                 service.session = None;
                 Err(message)
@@ -206,15 +211,15 @@ async fn save_artifact(
     app: AppHandle,
 ) -> Result<Option<String>, String> {
     if data.is_empty() || data.len() > 10 * 1024 * 1024 {
-        return Err("Некоректний розмір файлу для збереження.".into());
+        return Err("Invalid file size.".into());
     }
     if matches!(kind, ArtifactKind::Png) && !data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Err("Файл не є PNG-зображенням.".into());
+        return Err("The file is not a PNG image.".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
         let (name, label, extension) = match kind {
-            ArtifactKind::Png => ("d110-label.png", "PNG-зображення", "png"),
-            ArtifactKind::Log => ("d110-printer.log", "Журнал принтера", "log"),
+            ArtifactKind::Png => ("d110-label.png", "PNG image", "png"),
+            ArtifactKind::Log => ("d110-printer.log", "Printer log", "log"),
         };
         let Some(file) = app
             .dialog()
@@ -225,18 +230,28 @@ async fn save_artifact(
         else {
             return Ok(None);
         };
-        let path = file
-            .into_path()
-            .map_err(|e| format!("Некоректний шлях файлу: {e}"))?;
-        std::fs::write(&path, &data).map_err(|e| format!("Не вдалося зберегти файл: {e}"))?;
-        Ok(Some(path.to_string_lossy().into_owned()))
+        // Android's document picker returns content:// URIs. FsExt opens them
+        // through ContentResolver and also handles ordinary desktop paths.
+        let display_path = file.to_string();
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        let mut output = app
+            .fs()
+            .open(file, options)
+            .map_err(|e| format!("Could not open the file: {e}"))?;
+        output
+            .write_all(&data)
+            .map_err(|e| format!("Could not save the file: {e}"))?;
+        Ok(Some(display_path))
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
@@ -247,7 +262,10 @@ pub fn run() {
             print_label,
             cancel_print,
             save_artifact
-        ])
+        ]);
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_blec::init());
+    let app = builder
         .build(tauri::generate_context!())
         .expect("Failed to build D110 Studio");
     app.run(|handle, event| {

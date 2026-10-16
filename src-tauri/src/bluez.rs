@@ -1,64 +1,26 @@
+use crate::printer::{identify, log, Device, PrinterInfo, CHAR_UUID, SERVICE_UUID};
 use dbus::arg::{PropMap, Variant};
 use dbus::blocking::{stdintf::org_freedesktop_dbus::Properties, Connection};
 use dbus::channel::Token;
 use dbus::message::MatchRule;
 use dbus::Path;
-use niimbot_core::{
-    model_id, protocol_version, Decoder, Packet, Transport, CONNECT_BYTES, D110_MODEL_ID,
-};
-use serde::Serialize;
+use niimbot_core::{Decoder, Packet, Transport, CONNECT_BYTES};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 const BLUEZ: &str = "org.bluez";
 const DEVICE: &str = "org.bluez.Device1";
 const ADAPTER: &str = "org.bluez.Adapter1";
 const CHAR: &str = "org.bluez.GattCharacteristic1";
 const SERVICE: &str = "org.bluez.GattService1";
-const SERVICE_UUID: &str = "e7810a71-73ae-499d-8c15-faa9aef0c3f2";
-const CHAR_UUID: &str = "bef8d6c9-9c21-4c9e-b632-bd58c1009f9f";
 const METHOD_TIMEOUT: Duration = Duration::from_secs(5);
 type Objects = HashMap<Path<'static>, HashMap<String, PropMap>>;
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Device {
-    pub id: String,
-    pub name: String,
-    pub address: String,
-    pub rssi: Option<i16>,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PrinterInfo {
-    pub device: Device,
-    pub model_id: u16,
-    pub protocol_version: Option<u8>,
-    pub dpi: u16,
-    pub head_width: u16,
-}
-
-#[derive(Clone, Serialize)]
-pub struct LogEntry {
-    pub level: &'static str,
-    pub message: String,
-}
-
-pub fn log(app: &AppHandle, level: &'static str, message: impl Into<String>) {
-    let entry = LogEntry {
-        level,
-        message: message.into(),
-    };
-    eprintln!("[{}] {}", entry.level, entry.message);
-    let _ = app.emit("printer-log", entry);
-}
-
 fn system_bus() -> Result<Connection, String> {
     Connection::new_system().map_err(|e| format!(
-        "Немає доступу до системної D-Bus: {e}. Запустіть застосунок у звичайній Linux-сесії з активним Bluetooth."
+        "Cannot access the system D-Bus: {e}. Run the app in a regular Linux session with Bluetooth enabled."
     ))
 }
 
@@ -70,9 +32,7 @@ fn objects(conn: &Connection) -> Result<Objects, String> {
             "GetManagedObjects",
             (),
         )
-        .map_err(|e| {
-            format!("Не вдалося прочитати пристрої BlueZ: {e}. Перевірте службу bluetooth.")
-        })?;
+        .map_err(|e| format!("Could not read BlueZ devices: {e}. Check the bluetooth service."))?;
     Ok(objects)
 }
 
@@ -114,7 +74,7 @@ pub fn scan(app: &AppHandle) -> Result<Vec<Device>, String> {
         .collect();
     adapters.sort_by(|a, b| a.0.cmp(&b.0));
     if adapters.is_empty() {
-        return Err("Bluetooth-адаптер не знайдено.".into());
+        return Err("No Bluetooth adapter found.".into());
     }
     let powered: Vec<_> = adapters
         .iter()
@@ -122,7 +82,7 @@ pub fn scan(app: &AppHandle) -> Result<Vec<Device>, String> {
         .map(|(p, _)| p.clone())
         .collect();
     if powered.is_empty() {
-        return Err("Bluetooth вимкнено. Увімкніть його в налаштуваннях Linux.".into());
+        return Err("Bluetooth is turned off. Enable it in Linux settings.".into());
     }
     let mut started = Vec::new();
     let result = (|| {
@@ -133,13 +93,13 @@ pub fn scan(app: &AppHandle) -> Result<Vec<Device>, String> {
             filter.insert("DuplicateData".into(), Variant(Box::new(false)));
             let _: () = proxy
                 .method_call(ADAPTER, "SetDiscoveryFilter", (filter,))
-                .map_err(|e| format!("Не вдалося налаштувати BLE-пошук: {e}"))?;
+                .map_err(|e| format!("Could not configure BLE discovery: {e}"))?;
             let _: () = proxy
                 .method_call(ADAPTER, "StartDiscovery", ())
-                .map_err(|e| format!("Не вдалося почати пошук: {e}"))?;
+                .map_err(|e| format!("Could not start discovery: {e}"))?;
             started.push(path.clone());
         }
-        log(app, "info", "Пошук D110 через BLE…");
+        log(app, "info", "Scanning for D110 printers over Bluetooth LE…");
         let deadline = Instant::now() + Duration::from_secs(6);
         while Instant::now() < deadline {
             conn.process(Duration::from_millis(100))
@@ -150,11 +110,7 @@ pub fn scan(app: &AppHandle) -> Result<Vec<Device>, String> {
             .filter_map(|(path, interfaces)| device_from(path, interfaces))
             .collect();
         devices.sort_by(|a, b| b.rssi.cmp(&a.rssi).then_with(|| a.name.cmp(&b.name)));
-        log(
-            app,
-            "info",
-            format!("Знайдено принтерів: {}", devices.len()),
-        );
+        log(app, "info", format!("Printers found: {}", devices.len()));
         Ok(devices)
     })();
     // Stop only discovery sessions started by this connection; BlueZ reference-counts them.
@@ -192,8 +148,8 @@ impl Session {
             .iter()
             .find(|(path, _)| *path == id)
             .and_then(|(path, interfaces)| device_from(path, interfaces))
-            .ok_or("Принтер не знайдено. Повторіть пошук D110.")?;
-        log(&app, "info", format!("Підключення до {}…", device.name));
+            .ok_or("Printer not found. Search for D110 again.")?;
+        log(&app, "info", format!("Connecting to {}…", device.name));
         let mut session = Self {
             conn,
             device,
@@ -210,8 +166,11 @@ impl Session {
                 .conn
                 .with_proxy(BLUEZ, session.device.id.as_str(), Duration::from_secs(15));
         if !proxy.get::<bool>(DEVICE, "Connected").unwrap_or(false) {
-            let _: () = proxy.method_call(DEVICE, "Connect", ())
-                .map_err(|e| format!("Не вдалося підключитися: {e}. Закрийте NIIMBOT на телефоні й увімкніть принтер."))?;
+            let _: () = proxy.method_call(DEVICE, "Connect", ()).map_err(|e| {
+                format!(
+                    "Could not connect: {e}. Close NIIMBOT on your phone and turn on the printer."
+                )
+            })?;
         }
         let deadline = Instant::now() + Duration::from_secs(12);
         loop {
@@ -222,7 +181,7 @@ impl Session {
                 break;
             }
             if Instant::now() >= deadline {
-                return Err("Принтер не надав BLE-сервіси за 12 секунд.".into());
+                return Err("Printer did not expose BLE services within 12 seconds.".into());
             }
             session
                 .conn
@@ -239,7 +198,7 @@ impl Session {
                     && text_prop(props, "UUID")?.eq_ignore_ascii_case(SERVICE_UUID))
                 .then(|| path.to_string())
             })
-            .ok_or("BLE-сервіс NIIMBOT не знайдено.")?;
+            .ok_or("NIIMBOT BLE service was not found.")?;
         let (characteristic, props) = managed
             .iter()
             .find_map(|(path, interfaces)| {
@@ -248,7 +207,7 @@ impl Session {
                     && text_prop(props, "UUID")?.eq_ignore_ascii_case(CHAR_UUID))
                 .then(|| (path.to_string(), props))
             })
-            .ok_or("BLE-канал друку NIIMBOT не знайдено.")?;
+            .ok_or("NIIMBOT BLE print characteristic was not found.")?;
         let flags: Vec<_> = props
             .get("Flags")
             .and_then(|v| v.0.as_iter())
@@ -262,7 +221,7 @@ impl Session {
             || !flags.iter().any(|f| f == "notify")
         {
             return Err(format!(
-                "Канал принтера не підтримує потрібні BLE-операції: {flags:?}"
+                "Printer does not support the required BLE operations: {flags:?}"
             ));
         }
         session.write_size = props
@@ -299,56 +258,29 @@ impl Session {
                         true
                     },
                 )
-                .map_err(|e| format!("Не вдалося підписатися на відповіді принтера: {e}"))?,
+                .map_err(|e| format!("Could not subscribe to printer responses: {e}"))?,
         );
         let _: () = session
             .conn
             .with_proxy(BLUEZ, session.characteristic.as_str(), METHOD_TIMEOUT)
             .method_call(CHAR, "StartNotify", ())
-            .map_err(|e| format!("Не вдалося увімкнути BLE-повідомлення: {e}"))?;
+            .map_err(|e| format!("Could not enable BLE notifications: {e}"))?;
         session.notifications_started = true;
         session.write_raw(CONNECT_BYTES)?;
         session.pump(Duration::from_millis(200))?;
 
-        // D110 firmware can return a short status packet. Model id is authoritative.
-        let status = session.optional(0xa5, vec![1], 0xb5);
-        let model = session.request(&Packet::new(0x40, vec![8]), 0x48, Duration::from_secs(2))?;
-        let model_id =
-            model_id(&model.data).ok_or("Принтер повернув порожній ідентифікатор моделі.")?;
-        if model_id != D110_MODEL_ID {
-            return Err(format!("Виявлено модель {model_id} (0x{model_id:04X}). Ця версія підтримує D110 (2304); D110_M має інший протокол."));
-        }
-        // Replicate the B1-family post-connect handshake. Unsupported info reads
-        // are optional, but every request has a bounded wait and is logged.
-        let _ = session.optional(0xa5, vec![1], 0xb5);
-        for sub in [8, 11, 13, 10, 7, 3, 12, 9] {
-            let _ = session.optional(0x40, vec![sub], 0x40 + sub);
-        }
-        let _ = session.optional(0xdc, vec![4], 0xd9);
-        let info = PrinterInfo {
-            device: session.device.clone(),
-            model_id,
-            protocol_version: status.as_ref().and_then(|p| protocol_version(&p.data)),
-            dpi: niimbot_core::DPI,
-            head_width: niimbot_core::HEAD_WIDTH,
-        };
-        log(&session.app, "info", format!("D110 підключено. Модель {model_id}, 203 dpi, 96 px; BLE-запис {} байт із паузою 10 мс.", session.write_size));
-        session.info = Some(info);
+        let app = session.app.clone();
+        let device = session.device.clone();
+        session.info = Some(identify(&mut session, device, &app)?);
+        log(
+            &session.app,
+            "info",
+            format!(
+                "BLE write size: {} bytes; pacing: 10 ms.",
+                session.write_size
+            ),
+        );
         Ok(session)
-    }
-
-    fn optional(&mut self, command: u8, data: Vec<u8>, expected: u8) -> Option<Packet> {
-        match self.request(
-            &Packet::new(command, data),
-            expected,
-            Duration::from_millis(1000),
-        ) {
-            Ok(packet) => Some(packet),
-            Err(error) => {
-                log(&self.app, "debug", error);
-                None
-            }
-        }
     }
 
     pub fn is_connected(&self) -> Result<bool, String> {
@@ -366,7 +298,7 @@ impl Session {
                     Duration::from_millis(20)
                         .min(deadline.saturating_duration_since(Instant::now())),
                 )
-                .map_err(|e| format!("Помилка читання Bluetooth: {e}"))?;
+                .map_err(|e| format!("Bluetooth read failed: {e}"))?;
             if Instant::now() >= deadline {
                 return Ok(());
             }
@@ -391,7 +323,9 @@ impl Session {
                         self.pump(Duration::from_millis(20))?;
                     }
                     Err(e) => {
-                        return Err(format!("Помилка BLE-запису: {e}. Перепідключіть принтер."))
+                        return Err(format!(
+                            "Bluetooth write failed: {e}. Reconnect your printer."
+                        ))
                     }
                 }
             }
@@ -456,7 +390,7 @@ impl Transport for Session {
         {
             let fault = rx.packets.remove(index).ok_or("BLE error queue changed")?;
             return Err(format!(
-                "Принтер відхилив команду {:02X}: RX {:02X} {:02X?}",
+                "Printer rejected command {:02X}: RX {:02X} {:02X?}",
                 packet.command, fault.command, fault.data
             ));
         }
@@ -508,14 +442,14 @@ impl Transport for Session {
                 }
                 if response.command == 0xdb || response.command == 0x00 {
                     return Err(format!(
-                        "Принтер відхилив команду {:02X}: RX {:02X} {:02X?}",
+                        "Printer rejected command {:02X}: RX {:02X} {:02X?}",
                         packet.command, response.command, response.data
                     ));
                 }
             }
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "Немає відповіді 0x{expected:02X} на команду 0x{:02X} за {} мс.",
+                    "No response 0x{expected:02X} to command 0x{:02X} within {} ms.",
                     packet.command,
                     timeout.as_millis()
                 ));
@@ -530,7 +464,7 @@ impl Transport for Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if let Err(error) = self.close() {
-            log(&self.app, "debug", format!("Відключення: {error}"));
+            log(&self.app, "debug", format!("Disconnect: {error}"));
         }
     }
 }

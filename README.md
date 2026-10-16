@@ -1,125 +1,144 @@
 # D110 Studio
 
-Локальний застосунок Tauri 2 для друку етикеток на **NIIMBOT D110** через
-Bluetooth LE у Linux. Маркування корпусу `R-R-WUj-D110A` записано як контекст
-пристрою; модель перевіряється за відповіддю принтера (`2304 / 0x0900`).
+A local **Tauri 2** label editor for the **NIIMBOT D110**, with Bluetooth LE
+printing on Linux, Windows, macOS, and Android.
 
-## Можливості
+English is the default interface language. Choose **English / Українська** in
+the top bar; the selection is remembered. Changing the interface language
+preserves your label text, images, and editor settings.
 
-- Пошук D110 на ввімкнених Bluetooth-адаптерах через BlueZ.
-- Підключення, перевірка моделі та відключення.
-- Текст українською, системні шрифти, вирівнювання, авто підбір розміру.
-- PNG/JPEG/WebP, текст із зображенням, чорно-білий поріг.
-- Розмір етикетки, щільність 1–5, до 20 копій, поворот і зміщення.
-- Попередній перегляд фактичного растрового зображення, PNG-експорт.
-- Прогрес, зупинка, журнал команд і відповідей, збереження редактора локально.
+## Features
 
-## Запуск
+- Discover D110 printers, connect, identify the printer model, and disconnect.
+- Text, system fonts, alignment, automatic text fitting, and image import.
+- Monochrome preview and PNG export through the system file picker.
+- Label dimensions, density 1–5, up to 20 copies, rotation, and feed offset.
+- Progress, cancellation, diagnostics, and local editor persistence.
+- Native BlueZ transport on Linux; `tauri-plugin-blec` on Windows, macOS,
+  and Android. The same Rust protocol implementation drives every platform.
 
-Потрібні Node.js 22+, Rust stable, BlueZ, GTK 3, WebKitGTK 4.1 та D-Bus.
-Для розробки у Fedora встанови системні залежності:
+## Development
+
+Install Node.js 22+, Rust stable, and the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
+Linux also needs BlueZ and the D-Bus development package. On Fedora:
 
 ```bash
 sudo dnf install gcc gcc-c++ pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel dbus-devel bluez
 ```
 
-Далі з каталогу клонованого репозиторію:
-
 ```bash
+git clone https://github.com/Rhonstin/niimbot-d110.git
 cd niimbot-d110
 npm ci
 npm run tauri dev
 ```
 
-Увімкни Bluetooth у Linux і сам принтер. Закрий NIIMBOT на телефоні.
-Натисни **Знайти принтер → Підключити**. Вибери розмір установленої
-етикетки. Шаблон **Тестова етикетка** змінює макет; **Надрукувати**
-надсилає його на принтер.
+Turn on the printer and Bluetooth, and close NIIMBOT on your phone.
+Choose **Find printer → Connect**, then select the actual loaded label size.
+**Test label** fills the editor; **Print** submits the displayed artwork.
 
-`npm run dev` відкриває лише редактор у браузері. Bluetooth працює через Rust
-у десктопному застосунку, а не через Web Bluetooth. Стандартний запуск не
-потребує root або окремого системного драйвера принтера.
+`npm run dev` opens the editor in a browser. Native Bluetooth is available
+inside the Tauri app. Browser mode still supports editing and PNG export.
 
-Якщо Bluetooth не знаходиться, перевір:
+On macOS the system requests Bluetooth permission. On Android allow **Nearby
+devices**; older Android versions also require location permission for BLE
+discovery. The app does not use Bluetooth scanning to derive your location.
+
+## Continuous integration and downloads
+
+[Build and test](https://github.com/Rhonstin/niimbot-d110/actions/workflows/ci.yml)
+runs on pushes to `main`, version tags (`v*`), pull requests, and manual runs.
+Download installers from the workflow run's **Artifacts** section:
+
+| Platform | Architectures | Output |
+| --- | --- | --- |
+| Linux | x64, ARM64 | `.deb`, `.rpm`, `.AppImage` |
+| Windows | x64 | NSIS `.exe`, WiX `.msi` |
+| macOS | Apple Silicon, Intel | `.dmg` |
+| Android | ARM64, x64 emulator | Debug-signed `.apk`, one per ABI |
+
+The checks job builds the frontend, runs the protocol, bitmap, localization,
+and Android manifest tests, then runs Rust formatting and Clippy. Platform
+builds start only after those checks pass. Cargo/npm lockfiles are committed;
+build artifacts are retained for 14 days. Builds do not require printer hardware.
+
+Desktop installers are not signed/notarized with a distribution certificate.
+Android artifacts are development builds signed with the runner's debug key.
+Store publishing and production signing are separate from these CI builds.
+
+## Local builds
 
 ```bash
-bluetoothctl show
-systemctl status bluetooth
+# Build the installers supported by the current desktop OS.
+npm run tauri build
+
+# Build only a Fedora RPM.
+npm run tauri build -- --bundles rpm
 ```
 
-Пошук використовує BLE-імена `D110…`, без фільтра за UUID: ці принтери можуть
-не рекламувати UUID сервісу. Принтери з кешу BlueZ також можуть відображатися;
-підключення перевіряє їхню фактичну доступність.
+Desktop binaries and bundles are under `target/release/` and
+`target/release/bundle/` (or `target/<target-triple>/release/` when specifying
+`--target`). Debug builds use `--debug` and the corresponding `debug/` directory.
 
-## Перевірки та збірка
+For Android, install JDK 17, the Android SDK/NDK, and the Rust targets first:
+
+```bash
+npm run tauri android init -- --ci
+node scripts/prepare-android.mjs
+npm run tauri icon -- src-tauri/icons/icon.svg
+npm run tauri android build -- --ci --debug --apk --split-per-abi --target aarch64 --target x86_64
+```
+
+The native Android project is generated from the pinned Tauri CLI. The setup
+script adds BLE permissions and limits legacy location permissions to Android
+11 and earlier. APKs are written under
+`src-tauri/gen/android/app/build/outputs/apk/`.
+
+## Verification
 
 ```bash
 npm run check
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-npm run tauri build -- --bundles rpm
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-Виконуваний файл: `target/release/niimbot-d110`.
-Пакет Fedora: `target/release/bundle/rpm/`.
+`cargo test -p niimbot-core` exercises the transport-independent print protocol
+without desktop libraries or printer hardware. Actual Bluetooth connections,
+paper registration, and firmware compatibility require a physical D110.
 
-Для швидкої локальної збірки з символами налагодження:
+## Printer protocol
 
-```bash
-npm run tauri build -- --debug --bundles rpm
-./target/debug/niimbot-d110
-```
+Supported model: D110 (`2304 / 0x0900`). The casing marking
+`R-R-WUj-D110A` is not the Bluetooth identity. D110_M (`2320`) uses a different
+sequence and is explicitly rejected in this version.
 
-Ця збірка також містить редактор усередині виконуваного файлу й не потребує
-Vite-сервера. RPM буде в `target/debug/bundle/rpm/`.
+The printhead is 96 pixels wide at 203 dpi, about 12 mm of printable width.
+A 15 mm label retains white side margins; a 30 mm feed length is 240 rows.
+The landscape preview rotates into a `96 × feed length` bitmap for transmission.
+Pixels are MSB-first and repeated rows are grouped in runs of at most 200.
 
-Для автономної перевірки ядра без залежностей Tauri:
+Each copy is a separate job: D110 firmware can accept a multi-copy setting
+while printing only its first page. The B1-family sequence uses a 7-byte
+PrintStart, PageStart, a 6-byte SetPageSize, bitmap rows, PageEnd, a completed
+page counter, and PrintEnd. Unacknowledged BLE writes are paced at 10 ms and
+split according to MTU (20-byte fallback).
 
-```bash
-cargo test -p niimbot-core
-```
+Success requires PageEnd acknowledgment, a completed page count of at least 1,
+and PrintEnd acknowledgment. Failures stop remaining copies, close the job,
+and require reconnection. Uncertain prints are never retried automatically;
+check the physical label before repeating a failed/cancelled job.
 
-## Протокол і обмеження
+## Source layout
 
-Підтримується D110 з ідентифікатором `2304`, послідовність B1: 7-байтовий
-PrintStart, PageStart, 6-байтовий SetPageSize, растрові рядки, PageEnd,
-опитування лічильника завершених сторінок, PrintEnd. D110_M (`2320`) поки
-не підтримується; застосунок явно повідомить про іншу модель.
+- `crates/niimbot-core`: framing, decoder, row encoding, print lifecycle.
+- `src-tauri/src/printer.rs`: shared models, identity checks, handshake, logging.
+- `src-tauri/src/bluez.rs`: Linux BlueZ transport.
+- `src-tauri/src/ble.rs`: Windows/macOS/Android BLE transport.
+- `src-tauri/src/lib.rs`: Tauri commands, worker state, cancellation, file export.
+- `src/bitmap.ts`: monochrome conversion and printhead rotation.
+- `src/i18n.ts`: English/Ukrainian UI messages and language preference.
+- `.github/workflows/ci.yml`: checks and installer/APK build matrix.
 
-Голівка має 96 пікселів при 203 dpi, близько 12 мм доступної ширини друку.
-На 15-мм етикетці бічні краї залишаються білими. Довжина 30 мм дає 240
-рядків. Редактор показує етикетку горизонтально, перед відправленням
-перетворює її на растр `96 × довжина`. Зміщення за замовчуванням 0;
-положення друку на конкретному рулоні потрібно перевірити фізично.
-
-Кожна копія друкується окремим завданням: D110 може підтвердити кількість
-N, але фактично надрукувати лише першу етикетку. Кадри мають XOR checksum,
-пікселі MSB-first, однакові рядки стискаються до повторів максимум 200.
-Запис без BLE-підтвердження має паузу 10 мс. Розмір шматка визначається
-з MTU, якщо він доступний, інакше використовується 20 байт.
-
-Успіх показується лише після PageEnd ACK, лічильника сторінок ≥1 та PrintEnd
-ACK. Таймаут, відмова принтера або розрив зв'язку зупиняють решту копій.
-Невизначені завдання не повторюються автоматично. Після помилки потрібне
-перепідключення. «Зупинити» завершує завдання, але етикетка могла вже почати
-друкуватися або вийти частково; перевір її перед повторенням.
-
-Фізичний друк на конкретному принтері ще не перевірено. Тести перевіряють
-протокол і растрову конвертацію; сумісність прошивки й положення друку
-потрібно підтвердити тестовою етикеткою.
-
-## Архітектура / Android
-
-- `crates/niimbot-core`: пакети, декодер, рядки, життєвий цикл друку;
-  тільки стандартна бібліотека Rust, незалежний від ОС.
-- `src-tauri/src/bluez.rs`: Linux D-Bus/BlueZ транспорт, сповіщення,
-  пошук, підключення. Виконується в окремому blocking-потоці.
-- `src-tauri/src/lib.rs`: команди Tauri, стан, події, скасування.
-- `src/bitmap.ts`: перетворення прев'ю на монохромний растр.
-- `src/main.ts`: редактор українською, збереження, події UI.
-
-Для Android наступним кроком буде Tauri mobile plugin із Kotlin BLE API
-та дозволами Bluetooth. Ядро протоколу і редактор можна повторно використати.
-Поточна збірка орієнтована лише на Linux.
-
-Джерела протоколу й ліцензії: [third_party/NOTICES.md](third_party/NOTICES.md).
+Protocol attribution: [third_party/NOTICES.md](third_party/NOTICES.md).

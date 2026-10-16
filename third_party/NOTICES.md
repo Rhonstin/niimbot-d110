@@ -8,6 +8,12 @@ Reference files: `docs/protocol-v4.md`, `src/niimbot.js`, `registry.json`.
 Consulted on 2026-10-14. The implementation here is Rust, with a Linux BlueZ
 transport and an independent TypeScript editor.
 
+Windows, macOS, and Android use the published
+[`tauri-plugin-blec`](https://github.com/MnlPhlp/tauri-plugin-blec) 0.18.0
+dependency (MIT OR Apache-2.0). Linux retains its direct BlueZ transport.
+The portable transport was implemented against the plugin's documented Rust
+API and its v0.18.0 source; no plugin sources are vendored here.
+
 Copyright (c) 2026 iscarelli. MIT license included in
 [`licenses/niimbot-web-bluetooth.LICENSE`](licenses/niimbot-web-bluetooth.LICENSE).
 

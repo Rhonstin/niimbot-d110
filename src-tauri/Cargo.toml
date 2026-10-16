@@ -17,8 +17,14 @@ tauri-build = { version = "=2.7.1", features = [] }
 [dependencies]
 tauri = { version = "=2.12.1", features = [] }
 tauri-plugin-dialog = "=2.8.1"
+tauri-plugin-fs = "=2.6.0"
 serde = { version = "1", features = ["derive"] }
 niimbot-core = { path = "../crates/niimbot-core" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "=0.9.12"
+
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "android"))'.dependencies]
+tauri-plugin-blec = "=0.18.0"
+tokio = { version = "1", features = ["sync", "time"] }
+uuid = "1"

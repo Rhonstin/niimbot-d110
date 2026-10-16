@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "node --experimental-strip-types --test src/bitmap.test.ts",
+    "test": "node --experimental-strip-types --test src/bitmap.test.ts src/i18n.test.ts scripts/prepare-android.test.mjs",
     "check": "npm run build && npm test && cargo test -p niimbot-core && cargo check -p niimbot-d110"
   },
   "dependencies": {

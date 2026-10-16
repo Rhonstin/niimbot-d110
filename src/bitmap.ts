@@ -2,7 +2,7 @@ export const HEAD_WIDTH = 96;
 export const DPI = 203;
 
 export function mmToPixels(mm: number): number {
-  if (!Number.isFinite(mm) || mm <= 0) throw new Error("Некоректний розмір етикетки.");
+  if (!Number.isFinite(mm) || mm <= 0) throw new Error("Invalid label size.");
   return Math.round((mm * DPI) / 25.4);
 }
 
@@ -14,10 +14,10 @@ function black(pixels: ArrayLike<number>, i: number, threshold: number): boolean
 
 function validate(pixels: ArrayLike<number>, width: number, height: number, threshold: number): void {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || width > 800 || height < 1 || height > HEAD_WIDTH) {
-    throw new Error("Некоректна геометрія зображення D110.");
+    throw new Error("Invalid D110 image dimensions.");
   }
-  if (pixels.length !== width * height * 4) throw new Error("Пошкоджені піксельні дані.");
-  if (!Number.isInteger(threshold) || threshold < 1 || threshold > 254) throw new Error("Некоректний поріг чорно-білого зображення.");
+  if (pixels.length !== width * height * 4) throw new Error("Invalid pixel data.");
+  if (!Number.isInteger(threshold) || threshold < 1 || threshold > 254) throw new Error("Invalid monochrome threshold.");
 }
 
 export function monochrome(
@@ -25,7 +25,7 @@ export function monochrome(
   threshold: number, flip: boolean, offset: number,
 ): Uint8ClampedArray<ArrayBuffer> {
   validate(pixels, width, height, threshold);
-  if (!Number.isInteger(offset) || Math.abs(offset) > 64) throw new Error("Некоректне зміщення друку.");
+  if (!Number.isInteger(offset) || Math.abs(offset) > 64) throw new Error("Invalid print offset.");
   const output = new Uint8ClampedArray(pixels.length).fill(255);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
